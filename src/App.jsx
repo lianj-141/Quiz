@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import Intro from './components/Intro'
+import QuizPanel from './components/QuizPanel'
+import Results from './components/Results'
 
 const QUESTION_TIME = 60
 
@@ -48,25 +51,32 @@ const QUIZ = [
 ]
 
 function App() {
-  // 页面阶段：intro -> quiz -> results
+  // 页面阶段：intro(开始页) -> quiz(答题页) -> results(结果页)
   const [stage, setStage] = useState('intro')
-  // 核心答题状态
+  // 当前题目索引（从 0 开始）
   const [questionIndex, setQuestionIndex] = useState(0)
+  // 总分：答对 +1，超时 -1，答错不加不减
   const [score, setScore] = useState(0)
+  // 当前题用户选中的选项索引；null 表示还没选
   const [selectedIndex, setSelectedIndex] = useState(null)
+  // 是否展示当前题反馈（正确/错误/超时）
   const [showFeedback, setShowFeedback] = useState(false)
+  // 当前题是否超时
   const [timedOut, setTimedOut] = useState(false)
+  // 当前题剩余秒数
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME)
+  // 每题结果汇总，用于结果页展示
   const [results, setResults] = useState([])
 
+  // 当前正在作答的题目对象
   const current = QUIZ[questionIndex]
 
-  // 进度条百分比
+  // 进度条百分比（例如第 2/5 题 -> 40%）
   const progress = useMemo(() => {
     return Math.round(((questionIndex + 1) / QUIZ.length) * 100)
   }, [questionIndex])
 
-  // 记录每题结果，用于最终汇总展示
+  // 把当前题结果写入 results[questionIndex]
   const recordResult = useCallback(({ selected, isCorrect, wasTimedOut }) => {
     setResults((prev) => {
       const next = [...prev]
@@ -83,6 +93,7 @@ function App() {
     })
   }, [current, questionIndex])
 
+  // 切题时要重置的“单题状态”
   const resetQuestionState = useCallback(() => {
     setSelectedIndex(null)
     setShowFeedback(false)
@@ -90,7 +101,7 @@ function App() {
     setTimeLeft(QUESTION_TIME)
   }, [])
 
-  // 开始或重新开始答题流程
+  // 从开始页进入答题，并重置整场测验状态
   const startQuiz = () => {
     setStage('quiz')
     setQuestionIndex(0)
@@ -99,7 +110,9 @@ function App() {
     resetQuestionState()
   }
 
+  // 用户点击某个选项后的处理
   const handleAnswer = (index) => {
+    // 如果已经显示反馈，禁止重复作答
     if (showFeedback) return
 
     const isCorrect = index === current.correctIndex
@@ -118,6 +131,7 @@ function App() {
     })
   }
 
+  // 进入下一题；如果已经是最后一题则跳到结果页
   const goToNextQuestion = useCallback(() => {
     if (questionIndex === QUIZ.length - 1) {
       setStage('results')
@@ -128,7 +142,7 @@ function App() {
     resetQuestionState()
   }, [questionIndex, resetQuestionState])
 
-  // 超时自动跳题并扣分
+  // 当前题超时时：记为错误、扣分，并短暂停留后自动下一题
   const handleTimeout = useCallback(() => {
     if (showFeedback) return
 
@@ -148,7 +162,11 @@ function App() {
     }, 1200)
   }, [goToNextQuestion, recordResult, showFeedback])
 
-  // 倒计时（显示反馈时暂停）
+  // 倒计时副作用：
+  // 1) 仅在 quiz 阶段且未显示反馈时运行
+  // 2) 每秒 timeLeft - 1
+  // 3) 到 0 后触发超时逻辑
+  // 4) 组件更新/卸载时清理定时器，避免重复计时
   useEffect(() => {
     if (stage !== 'quiz' || showFeedback) return
 
@@ -166,6 +184,7 @@ function App() {
     return () => clearInterval(timer)
   }, [stage, showFeedback, questionIndex, handleTimeout])
 
+  // 结果页“再玩一次”：回到 intro 并清空状态
   const restart = () => {
     setStage('intro')
     setQuestionIndex(0)
@@ -199,158 +218,34 @@ function App() {
         </div>
       </header>
 
-      {stage === 'intro' && (
-        <section className="panel intro">
-          <h2>Ready to begin?</h2>
-          <p>
-            Tap start to get the first question. Each answer shows instant
-            feedback, and timeouts will move you forward automatically.
-          </p>
-          <button className="primary" onClick={startQuiz}>
-            Start the quiz
-          </button>
-        </section>
-      )}
+      {/* 开始页：仅在 stage = intro 时渲染 */}
+      {stage === 'intro' && <Intro onStart={startQuiz} />}
 
+      {/* 答题页：仅在 stage = quiz 且当前题存在时渲染 */}
       {stage === 'quiz' && current && (
-        <section className="panel quiz">
-          <div className="quiz-meta">
-            <div>
-              <span className="label">Question</span>
-              <span className="value">
-                {questionIndex + 1} / {QUIZ.length}
-              </span>
-            </div>
-            <div>
-              <span className="label">Score</span>
-              <span className="value">{score}</span>
-            </div>
-            <div>
-              <span className="label">Time left</span>
-              <span className={`value ${timeLeft <= 10 ? 'urgent' : ''}`}>
-                {timeLeft}s
-              </span>
-            </div>
-          </div>
-
-          <div className="progress">
-            <div className="progress-bar" style={{ width: `${progress}%` }} />
-          </div>
-
-          <div className="question-card">
-            <h2>{current.question}</h2>
-            <div className="options">
-              {current.options.map((option, index) => {
-                const isCorrect = index === current.correctIndex
-                const isSelected = index === selectedIndex
-                const showState = showFeedback
-
-                let className = 'option'
-
-                if (showState && isCorrect) {
-                  className += ' correct'
-                }
-
-                if (showState && isSelected && !isCorrect) {
-                  className += ' incorrect'
-                }
-
-                return (
-                  <button
-                    key={option}
-                    className={className}
-                    onClick={() => handleAnswer(index)}
-                    disabled={showFeedback}
-                  >
-                    {option}
-                  </button>
-                )
-              })}
-            </div>
-
-            {showFeedback && (
-              <div className="feedback">
-                <p className="feedback-title">
-                  {timedOut
-                    ? 'Time is up!'
-                    : selectedIndex === current.correctIndex
-                    ? 'Correct!'
-                    : 'Not quite.'}
-                </p>
-                <p>
-                  The correct answer is{' '}
-                  <span className="highlight">
-                    {current.options[current.correctIndex]}
-                  </span>
-                  . {current.explanation}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {showFeedback && !timedOut && (
-            <button className="secondary" onClick={goToNextQuestion}>
-              {questionIndex === QUIZ.length - 1 ? 'View results' : 'Next question'}
-            </button>
-          )}
-        </section>
+        <QuizPanel
+          current={current}
+          questionIndex={questionIndex}
+          totalQuestions={QUIZ.length}
+          score={score}
+          timeLeft={timeLeft}
+          progress={progress}
+          selectedIndex={selectedIndex}
+          showFeedback={showFeedback}
+          timedOut={timedOut}
+          onAnswer={handleAnswer}
+          onNext={goToNextQuestion}
+        />
       )}
 
+      {/* 结果页：仅在 stage = results 时渲染 */}
       {stage === 'results' && (
-        <section className="panel results">
-          <h2>Final score</h2>
-          <p className="score">
-            {score} / {QUIZ.length}
-          </p>
-          <p className="score-detail">
-            Review every answer below. Timeouts are marked and scored as -1.
-          </p>
-
-          <div className="results-grid">
-            {results.map((result, index) => (
-              <div key={result.question} className="result-card">
-                <div className="result-header">
-                  <span className="result-index">Q{index + 1}</span>
-                  <span
-                    className={`result-pill ${
-                      result.timedOut
-                        ? 'timeout'
-                        : result.isCorrect
-                        ? 'correct'
-                        : 'incorrect'
-                    }`}
-                  >
-                    {result.timedOut
-                      ? 'Timeout'
-                      : result.isCorrect
-                      ? 'Correct'
-                      : 'Incorrect'}
-                  </span>
-                </div>
-                <h3>{result.question}</h3>
-                <p>
-                  Your answer:{' '}
-                  <span className="highlight">
-                    {result.selectedIndex === null
-                      ? 'No answer'
-                      : result.options[result.selectedIndex]}
-                  </span>
-                </p>
-                <p>
-                  Correct answer:{' '}
-                  <span className="highlight">
-                    {result.options[result.correctIndex]}
-                  </span>
-                </p>
-                <p className="explanation">{result.explanation}</p>
-              </div>
-            ))}
-          </div>
-
-          <button className="primary" onClick={restart}>
-            Play again
-          </button>
-        </section>
+        <Results
+          score={score}
+          totalQuestions={QUIZ.length}
+          results={results}
+          onRestart={restart}
+        />
       )}
     </div>
   )
